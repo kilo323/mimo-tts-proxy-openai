@@ -7,3 +7,7 @@ services:
       - "9880:9880"
     env_file:
       - .env
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./voices.yaml:/app/voices.yaml
+      - ./samples:/app/samples
