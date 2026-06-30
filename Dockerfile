@@ -5,7 +5,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
 
 WORKDIR /app
 
-COPY . /app
+COPY mimo_tts_proxy /app/mimo_tts_proxy
+COPY config.yaml voices.yaml /app/
+COPY samples /app/samples
 
 RUN pip install --no-cache-dir openai pyyaml
 

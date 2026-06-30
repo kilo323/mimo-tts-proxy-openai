@@ -1,9 +1,5 @@
 voices:
-  zhuangfangyi:
-    sample_file: "samples/庄方宜-声音克隆.wav"
-    base_style: "温柔、知性的女声"
+  cortana:
+    sample_file: "samples/cortana.mp3"
+    base_style: "Ethereal, composed female AI voice; airy but clear, moderate cadence, restrained emotion, soft upward inflection at phrase endings, with a subtle holographic sci-fi feel."
     emotion_inference: true
-  bingtang:
-    preset: "冰糖"
-    base_style: "活泼少女"
-    emotion_inference: false
