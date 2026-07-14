@@ -46,93 +46,74 @@ class TranscribeTest(unittest.TestCase):
 
     # --- message structure ---
 
-    def test_user_message_has_one_role(self):
+    def test_single_user_message(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr")
         messages = self.client.chat.completions.create.call_args.kwargs["messages"]
         self.assertEqual(len(messages), 1)
         self.assertEqual(messages[0]["role"], "user")
 
-    def test_content_is_two_part_array(self):
+    def test_content_is_single_part_array(self):
+        """MIMO gateway rejects text parts, so content must be only the audio."""
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
         self.assertIsInstance(content, list)
-        self.assertEqual(len(content), 2)
+        self.assertEqual(len(content), 1)
 
-    def test_first_part_is_text_prompt(self):
+    def test_content_part_is_input_audio(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertEqual(content[0]["type"], "text")
-        self.assertIn("text", content[0])
+        self.assertEqual(content[0]["type"], "input_audio")
+        self.assertIn("input_audio", content[0])
 
-    def test_second_part_is_audio_url(self):
+    # --- base64 audio data ---
+
+    def test_input_audio_data_is_base64_encoded_audio(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertEqual(content[1]["type"], "audio_url")
-        self.assertIn("audio_url", content[1])
+        audio_part = content[0]["input_audio"]
+        self.assertEqual(base64.b64decode(audio_part["data"]), self.fake_audio)
 
-    # --- base64 data URL ---
-
-    def test_audio_url_is_base64_data_url(self):
+    def test_input_audio_format_matches_audio_format_wav(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        url = content[1]["audio_url"]["url"]
-        self.assertTrue(url.startswith("data:audio/wav;base64,"))
-        encoded = url.split(",", 1)[1]
-        self.assertEqual(base64.b64decode(encoded), self.fake_audio)
+        self.assertEqual(content[0]["input_audio"]["format"], "wav")
 
-    def test_mp3_format_in_data_url_mime_type(self):
+    def test_input_audio_format_matches_audio_format_mp3(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "mp3", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        url = content[1]["audio_url"]["url"]
-        self.assertTrue(url.startswith("data:audio/mp3;base64,"))
+        self.assertEqual(content[0]["input_audio"]["format"], "mp3")
 
-    def test_flac_format_in_data_url_mime_type(self):
+    def test_input_audio_format_matches_audio_format_flac(self):
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "flac", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        url = content[1]["audio_url"]["url"]
-        self.assertTrue(url.startswith("data:audio/flac;base64,"))
+        self.assertEqual(content[0]["input_audio"]["format"], "flac")
 
-    # --- language hint ---
+    # --- language param (accepted but ignored — MIMO gateway handles it) ---
 
-    def test_language_none_uses_generic_prompt(self):
-        self._stub_response("test")
-        transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr", language=None)
-        content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertEqual(content[0]["text"], "Transcribe this audio.")
-
-    def test_language_zh_adds_chinese_hint(self):
+    def test_language_param_accepted_without_error(self):
+        """language is accepted for API compatibility but ignored by MIMO."""
         self._stub_response("test")
         transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr", language="zh")
+        # No text part should be present regardless of language
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertIn("Chinese", content[0]["text"])
-
-    def test_language_en_adds_english_hint(self):
-        self._stub_response("test")
-        transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr", language="en")
-        content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertIn("English", content[0]["text"])
-
-    def test_unknown_language_code_falls_back_to_generic(self):
-        self._stub_response("test")
-        transcribe(self.client, self.fake_audio, "wav", "mimo-v2.5-asr", language="ja")
-        content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        self.assertEqual(content[0]["text"], "Transcribe this audio.")
+        self.assertEqual(len(content), 1)
+        self.assertEqual(content[0]["type"], "input_audio")
 
     # --- empty / edge ---
 
-    def test_empty_audio_produces_valid_base64_url(self):
+    def test_empty_audio_produces_valid_base64_data(self):
         self._stub_response("")
         transcribe(self.client, b"", "wav", "mimo-v2.5-asr")
         content = self.client.chat.completions.create.call_args.kwargs["messages"][0]["content"]
-        url = content[1]["audio_url"]["url"]
-        self.assertTrue(url.endswith("base64,"))
+        audio_part = content[0]["input_audio"]
+        self.assertEqual(base64.b64decode(audio_part["data"]), b"")
 
 
 if __name__ == "__main__":

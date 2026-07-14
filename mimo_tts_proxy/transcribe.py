@@ -1,17 +1,11 @@
 """ASR (speech-to-text) via MIMO chat completions.
 
-MIMO's ``mimo-v2.5-asr`` model accepts audio as a base64 data URL in a
-multi-part user-message content array, returning transcribed text in
-``choices[0].message.content`` — the same chat-completions contract as TTS.
+MIMO's ``mimo-v2.5-asr`` model accepts a single base64-encoded ``input_audio``
+part in a user-message content array, returning transcribed text in
+``choices[0].message.content``. The gateway injects its own text prompt, so
+the request must contain *only* the audio part — no text parts.
 """
 import base64
-
-
-LANGUAGE_PROMPTS = {
-    None: "Transcribe this audio.",
-    "zh": "Transcribe this audio in Chinese.",
-    "en": "Transcribe this audio in English.",
-}
 
 
 def transcribe(client, audio_bytes, audio_format, model, language=None):
@@ -23,16 +17,14 @@ def transcribe(client, audio_bytes, audio_format, model, language=None):
         audio_format: Format string without dot prefix (``"wav"``, ``"mp3"``,
             ``"flac"``, etc.).
         model: ASR model name, e.g. ``"mimo-v2.5-asr"``.
-        language: Optional ISO-639-1 code. ``"zh"`` / ``"en"`` add a language
-            hint to the prompt; ``None`` (the default) uses auto-detection.
+        language: Optional ISO-639-1 code. Currently ignored — the MIMO gateway
+            injects its own prompt and handles language detection. Accepted
+            for API compatibility with the OpenAI transcriptions interface.
 
     Returns:
         The transcribed text string.
     """
     encoded = base64.b64encode(audio_bytes).decode("ascii")
-    data_url = "data:audio/{fmt};base64,{data}".format(fmt=audio_format, data=encoded)
-
-    prompt_text = LANGUAGE_PROMPTS.get(language, LANGUAGE_PROMPTS[None])
 
     completion = client.chat.completions.create(
         model=model,
@@ -40,8 +32,10 @@ def transcribe(client, audio_bytes, audio_format, model, language=None):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "audio_url", "audio_url": {"url": data_url}},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": encoded, "format": audio_format},
+                    },
                 ],
             }
         ],
