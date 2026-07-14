@@ -62,6 +62,52 @@ def verify_audio(path, fmt):
     return len(head) > 0
 
 
+def transcribe(filepath, language=None):
+    """Send an audio file to /v1/audio/transcriptions and return the text."""
+    boundary = "----SmokeTestBoundary"
+    filename = os.path.basename(filepath)
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "wav"
+    mime_type = "audio/" + ("mpeg" if ext == "mp3" else ext)
+
+    with open(filepath, "rb") as f:
+        audio_data = f.read()
+
+    parts = []
+    # file part
+    parts.append(
+            '--{b}\r\nContent-Disposition: form-data; name="file"; filename="{fn}"\r\n'
+            "Content-Type: {ct}\r\n\r\n".format(b=boundary, fn=filename, ct=mime_type).encode()
+    )
+    parts.append(audio_data)
+    parts.append(b"\r\n")
+    # model part
+    parts.append(
+        '--{b}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n'.format(
+            b=boundary
+        ).encode()
+    )
+    if language:
+        parts.append(
+            '--{b}\r\nContent-Disposition: form-data; name="language"\r\n\r\n{l}\r\n'.format(
+                b=boundary, l=language
+            ).encode()
+        )
+    parts.append("--{b}--\r\n".format(b=boundary).encode())
+    body = b"".join(parts)
+
+    req = urllib.request.Request(
+        BASE_URL + "/v1/audio/transcriptions",
+        data=body,
+        headers={
+            "Content-Type": 'multipart/form-data; boundary="{b}"'.format(b=boundary),
+            "Authorization": "Bearer smoke",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return r.status, r.headers.get("Content-Type"), r.read()
+
+
 def main():
     if not os.environ.get("MIMO_API_KEY"):
         print("MIMO_API_KEY not set; cannot run smoke test", file=sys.stderr)
@@ -107,6 +153,15 @@ def main():
         open(path2, "wb").write(audio)
         assert verify_audio(path2, "wav"), "preset: invalid audio"
         print(f"[preset] {len(audio)} bytes  {ctype}  -> {path2}")
+
+        # 3) ASR transcription — send a WAV file and verify text comes back
+        # Use one of the TTS output files as test audio (it contains speech)
+        asr_file = path2  # the preset WAV from step 2
+        status, ctype, text_bytes = transcribe(asr_file)
+        assert status == 200, f"asr: status {status}"
+        text = json.loads(text_bytes.decode("utf-8"))["text"]
+        assert len(text) > 0, "asr: empty transcription"
+        print(f"[asr   ] {len(text)} chars  -> {text[:80]}")
 
         print("\nSMOKE TEST PASSED")
         return 0
