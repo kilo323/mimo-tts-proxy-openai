@@ -7,7 +7,8 @@ WORKDIR /app
 
 COPY . /app
 
-RUN pip install --no-cache-dir openai pyyaml
+RUN pip install --no-cache-dir openai pyyaml \
+    "mcp-auth @ git+https://github.com/Jedi-Pz/mcp-auth.git"
 
 EXPOSE 9880
 
