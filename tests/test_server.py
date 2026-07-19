@@ -2,6 +2,8 @@ import json
 import unittest
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from mimo_tts_proxy.server import check_auth, ProxyError, parse_multipart, handle_transcription
 
 
@@ -35,6 +37,53 @@ class CheckAuthTest(unittest.TestCase):
             check_auth("Bearer wrong-key", "correct-key")
         self.assertEqual(ctx.exception.status, 401)
         self.assertIn("invalid", str(ctx.exception).lower())
+
+
+class StoreAuthTest(unittest.TestCase):
+    """Token-store-backed auth (mcp_auth), preferred when MCP_AUTH_DB is set."""
+
+    def setUp(self):
+        pytest.importorskip("mcp_auth")
+        import tempfile
+        from mcp_auth import tokens
+        from mcp_auth.store import SQLiteTokenStore
+
+        self._tmp = tempfile.mkdtemp()
+        self.store = SQLiteTokenStore(self._tmp + "/t.db")
+        self.tokens = tokens
+
+    def tearDown(self):
+        self.store.close()
+
+    def _mint(self, service="mimo"):
+        full, rec = self.tokens.new_token(service, "tester")
+        self.store.insert(rec)
+        return full, rec
+
+    def test_valid_token_passes(self):
+        full, _ = self._mint()
+        check_auth("Bearer " + full, None, self.store)
+
+    def test_missing_header_raises(self):
+        with self.assertRaises(ProxyError) as ctx:
+            check_auth(None, None, self.store)
+        self.assertEqual(ctx.exception.status, 401)
+
+    def test_wrong_token_raises(self):
+        self._mint()
+        with self.assertRaises(ProxyError):
+            check_auth("Bearer sk-mimo-00000000.wrong", None, self.store)
+
+    def test_wrong_service_token_raises(self):
+        full, _ = self._mint(service="gemini")
+        with self.assertRaises(ProxyError):
+            check_auth("Bearer " + full, None, self.store)
+
+    def test_revoked_token_raises(self):
+        full, rec = self._mint()
+        self.store.revoke(rec.id)
+        with self.assertRaises(ProxyError):
+            check_auth("Bearer " + full, None, self.store)
 
 
 def _make_multipart(fields):

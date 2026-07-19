@@ -1,5 +1,6 @@
 """HTTP server implementing the OpenAI /v1/audio/speech endpoint."""
 import json
+import os
 import sys
 from email.parser import BytesParser
 from email.policy import default as email_default_policy
@@ -12,6 +13,21 @@ from .transcode import content_type_for, needs_transcode, transcode_audio
 from .transcribe import transcribe
 from .voices import build_voice_param, resolve_voice
 
+#: Service slug used for mcp_auth token scoping.
+AUTH_SERVICE = "mimo"
+
+
+def open_token_store():
+    """Open the mcp_auth token store when ``MCP_AUTH_DB`` is set, else None.
+
+    Imported lazily so mcp_auth is only required when store-based auth is on.
+    """
+    if not os.environ.get("MCP_AUTH_DB"):
+        return None
+    from mcp_auth.store import open_store
+
+    return open_store()  # path from MCP_AUTH_DB
+
 
 class ProxyError(Exception):
     def __init__(self, message, status=400, type_="invalid_request_error"):
@@ -20,14 +36,25 @@ class ProxyError(Exception):
         self.type_ = type_
 
 
-def check_auth(auth_header, proxy_key):
-    """Validate ``Authorization: Bearer <key>`` against the configured proxy key.
+def check_auth(auth_header, proxy_key, store=None):
+    """Validate ``Authorization: Bearer <key>``.
 
-    When *proxy_key* is None, auth is not required — all requests pass.
-    When *proxy_key* is set, the ``Authorization`` header must contain
-    ``Bearer <key>``` (case-insensitive scheme).  Raises ProxyError(401)
-    on mismatch.
+    Two modes:
+    - **Token store** (preferred): when *store* is an mcp_auth TokenStore, the
+      bearer token is verified against it (service ``mimo``). Raises
+      ProxyError(401) on missing/invalid/revoked/expired tokens.
+    - **Legacy static key**: when *store* is None and *proxy_key* is set, the
+      header must contain ``Bearer <proxy_key>``. When *proxy_key* is also
+      None, auth is not required — all requests pass.
     """
+    if store is not None:
+        from mcp_auth.adapters.http import verify_bearer
+
+        if not auth_header:
+            raise ProxyError("Authorization header missing", 401, "authentication_error")
+        if verify_bearer(store, auth_header, service=AUTH_SERVICE) is None:
+            raise ProxyError("Invalid or expired API token", 401, "authentication_error")
+        return
     if proxy_key is None:
         return
     if not auth_header:
@@ -186,7 +213,7 @@ def handle_speech(body, state):
     return audio_bytes, content_type_for(response_format)
 
 
-def make_handler(state, proxy_key):
+def make_handler(state, proxy_key, store=None):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -203,7 +230,7 @@ def make_handler(state, proxy_key):
 
         def do_GET(self):
             try:
-                check_auth(self.headers.get("Authorization"), proxy_key)
+                check_auth(self.headers.get("Authorization"), proxy_key, store)
             except ProxyError as e:
                 self._send_json(e.status, {"error": {"message": str(e), "type": e.type_}})
                 return
@@ -214,7 +241,7 @@ def make_handler(state, proxy_key):
 
         def do_POST(self):
             try:
-                check_auth(self.headers.get("Authorization"), proxy_key)
+                check_auth(self.headers.get("Authorization"), proxy_key, store)
             except ProxyError as e:
                 self._send_json(e.status, {"error": {"message": str(e), "type": e.type_}})
                 return
@@ -278,11 +305,16 @@ def make_handler(state, proxy_key):
 
 
 def serve(state, host, port):
-    proxy_key = resolve_proxy_api_key()
-    if proxy_key:
-        print("proxy API key configured — authentication required", file=sys.stderr)
+    store = open_token_store()
+    proxy_key = None
+    if store is not None:
+        print("mcp_auth token store configured — bearer-token auth required (MCP_AUTH_DB)", file=sys.stderr)
     else:
-        print("proxy API key NOT configured — running open (no auth)", file=sys.stderr)
-    server = ThreadingHTTPServer((host, port), make_handler(state, proxy_key))
+        proxy_key = resolve_proxy_api_key()
+        if proxy_key:
+            print("proxy API key configured — authentication required", file=sys.stderr)
+        else:
+            print("proxy API key NOT configured — running open (no auth)", file=sys.stderr)
+    server = ThreadingHTTPServer((host, port), make_handler(state, proxy_key, store))
     print("mimo-tts-proxy listening on http://%s:%d/v1/audio/speech" % (host, port))
     server.serve_forever()
