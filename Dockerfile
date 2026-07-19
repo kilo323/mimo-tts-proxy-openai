@@ -7,8 +7,9 @@ WORKDIR /app
 
 COPY . /app
 
+# Tarball URL (not git+) keeps the image free of a git install.
 RUN pip install --no-cache-dir openai pyyaml \
-    "mcp-auth @ git+https://github.com/Jedi-Pz/mcp-auth.git"
+    "mcp-auth @ https://github.com/Jedi-Pz/mcp-auth/archive/refs/heads/main.tar.gz"
 
 EXPOSE 9880
 
