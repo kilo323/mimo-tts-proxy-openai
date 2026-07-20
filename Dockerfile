@@ -9,7 +9,9 @@ COPY mimo_tts_proxy /app/mimo_tts_proxy
 COPY config.yaml voices.yaml /app/
 COPY samples /app/samples
 
-RUN pip install --no-cache-dir openai pyyaml
+# Tarball URL (not git+) keeps the image free of a git install.
+RUN pip install --no-cache-dir openai pyyaml \
+    "mcp-auth @ https://github.com/Jedi-Pz/mcp-auth/archive/refs/heads/main.tar.gz"
 
 EXPOSE 9880
 

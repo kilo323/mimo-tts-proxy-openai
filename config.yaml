@@ -8,6 +8,7 @@ mimo:
   tts_model_preset: "mimo-v2.5-tts"
   tts_model_clone: "mimo-v2.5-tts-voiceclone"
   audio_format: "wav"
+  asr_model: "mimo-v2.5-asr"
 
 emotion:
   enabled: true
