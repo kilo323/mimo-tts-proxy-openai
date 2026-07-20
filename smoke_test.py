@@ -17,18 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
-from mimo_tts_proxy.config import BASE_DIR, _read_dotenv_key, _read_dotenv_value
-
 BASE_URL = "http://127.0.0.1:9880"
-
-
-def load_smoke_test_env():
-    dotenv_path = os.environ.get("MIMO_TTS_PROXY_DOTENV", str(BASE_DIR / ".env"))
-    mimo_api_key = _read_dotenv_key(dotenv_path) or os.environ.get("MIMO_API_KEY")
-    proxy_api_key = _read_dotenv_value(dotenv_path, "PROXY_API_KEY") or os.environ.get(
-        "PROXY_API_KEY"
-    )
-    return mimo_api_key, proxy_api_key
 
 
 def wait_for_server(proc, timeout=30):
@@ -45,17 +34,12 @@ def wait_for_server(proc, timeout=30):
     return False, "timed out waiting for /health"
 
 
-def speech(body, proxy_api_key=None):
+def speech(body):
     data = json.dumps(body).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if proxy_api_key:
-        headers["Authorization"] = f"Bearer {proxy_api_key}"
-    else:
-        headers["Authorization"] = "Bearer smoke"
     req = urllib.request.Request(
         BASE_URL + "/v1/audio/speech",
         data=data,
-        headers=headers,
+        headers={"Content-Type": "application/json", "Authorization": "Bearer smoke"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -78,7 +62,7 @@ def verify_audio(path, fmt):
     return len(head) > 0
 
 
-def transcribe(filepath, language=None, proxy_api_key=None):
+def transcribe(filepath, language=None):
     """Send an audio file to /v1/audio/transcriptions and return the text."""
     boundary = "----SmokeTestBoundary"
     filename = os.path.basename(filepath)
@@ -111,18 +95,13 @@ def transcribe(filepath, language=None, proxy_api_key=None):
     parts.append("--{b}--\r\n".format(b=boundary).encode())
     body = b"".join(parts)
 
-    headers = {
-        "Content-Type": 'multipart/form-data; boundary="{b}"'.format(b=boundary),
-    }
-    if proxy_api_key:
-        headers["Authorization"] = f"Bearer {proxy_api_key}"
-    else:
-        headers["Authorization"] = "Bearer smoke"
-
     req = urllib.request.Request(
         BASE_URL + "/v1/audio/transcriptions",
         data=body,
-        headers=headers,
+        headers={
+            "Content-Type": 'multipart/form-data; boundary="{b}"'.format(b=boundary),
+            "Authorization": "Bearer smoke",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=120) as r:
@@ -130,8 +109,7 @@ def transcribe(filepath, language=None, proxy_api_key=None):
 
 
 def main():
-    mimo_api_key, proxy_api_key = load_smoke_test_env()
-    if not mimo_api_key:
+    if not os.environ.get("MIMO_API_KEY"):
         print("MIMO_API_KEY not set; cannot run smoke test", file=sys.stderr)
         return 1
 
@@ -148,15 +126,12 @@ def main():
         print("server is up at", BASE_URL)
 
         # 1) cloned voice + emotion inference -> mp3
-        status, ctype, audio = speech(
-            {
-                "model": "tts-1",
-                "input": "哇，今天天气真好，我们一起出去玩吧！",
-                "voice": "zhuangfangyi",
-                "response_format": "mp3",
-            },
-            proxy_api_key=proxy_api_key,
-        )
+        status, ctype, audio = speech({
+            "model": "tts-1",
+            "input": "哇，今天天气真好，我们一起出去玩吧！",
+            "voice": "zhuangfangyi",
+            "response_format": "mp3",
+        })
         assert status == 200, f"clone: status {status}"
         assert ctype == "audio/mpeg", f"clone: content-type {ctype}"
         assert len(audio) > 2000, f"clone: audio too small ({len(audio)} bytes)"
@@ -166,15 +141,12 @@ def main():
         print(f"[clone ] {len(audio)} bytes  {ctype}  -> {path1}")
 
         # 2) preset voice -> wav
-        status, ctype, audio = speech(
-            {
-                "model": "tts-1",
-                "input": "你好，这是预置音色测试。",
-                "voice": "bingtang",
-                "response_format": "wav",
-            },
-            proxy_api_key=proxy_api_key,
-        )
+        status, ctype, audio = speech({
+            "model": "tts-1",
+            "input": "你好，这是预置音色测试。",
+            "voice": "bingtang",
+            "response_format": "wav",
+        })
         assert status == 200, f"preset: status {status}"
         assert ctype == "audio/wav", f"preset: content-type {ctype}"
         path2 = "/tmp/mimo_proxy_smoke_preset.wav"
@@ -185,10 +157,7 @@ def main():
         # 3) ASR transcription — send a WAV file and verify text comes back
         # Use one of the TTS output files as test audio (it contains speech)
         asr_file = path2  # the preset WAV from step 2
-        status, ctype, text_bytes = transcribe(
-            asr_file,
-            proxy_api_key=proxy_api_key,
-        )
+        status, ctype, text_bytes = transcribe(asr_file)
         assert status == 200, f"asr: status {status}"
         text = json.loads(text_bytes.decode("utf-8"))["text"]
         assert len(text) > 0, "asr: empty transcription"
